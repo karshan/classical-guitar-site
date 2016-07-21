@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 
 import Control.Exception (try, SomeException)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (find)
 import Data.Monoid
@@ -16,6 +17,7 @@ import Util
 import DB
 import Laajic
 import Crypto.Random (getRandomBytes)
+import qualified Data.Aeson as Aeson (encode)
 
 staticRoot :: IsString a => a
 staticRoot = "cgc/"
@@ -33,7 +35,17 @@ cookieResponse cookie = responseLBS status302
                         [ (hLocation, "/index.html")
                         , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; HttpOnly;")] -- TODO add secure flag once https
                         ""
+cookieName :: (IsString a) => a
 cookieName = "cgc_sid"
+
+getCookieJSON :: Key -> Request -> IO (Maybe CookieJSON)
+getCookieJSON key req = do
+    let mCookie = (do
+            cookieHeader <- lookup hCookie (requestHeaders req)
+            lookup cookieName $ parseCookies cookieHeader)
+    maybe (return Nothing)
+        (\cookie -> validateCookie key $ toS cookie)
+        mCookie
 
 app :: Key -> DBContext -> Application
 app key db req f
@@ -70,7 +82,6 @@ app key db req f
                             f loginFailed)
                     mUser)
             mEmailPass
-
     | otherwise = do
         let notFound = f $ responseLBS status404 [] "404 Not Found"
         let path = staticRoot <> intercalate "/" (pathInfo req)
@@ -87,6 +98,14 @@ app key db req f
                     if mimeType == "text/html" then do
                         header <- LBS.readFile (staticRoot <> "header.html")
                         footer <- LBS.readFile (staticRoot <> "footer.html")
-                        f $ responseLBS status200 [(hContentType, mimeType)] (header <> contents <> footer)
+                        mCookieJSON <- getCookieJSON key req
+                        let jsVars =
+                                maybe "" 
+                                    (\cookieJSON -> 
+                                        "<script>user = " <>
+                                            Aeson.encode cookieJSON <>
+                                            ";</script>")
+                                    mCookieJSON
+                        f $ responseLBS status200 [(hContentType, mimeType)] (header <> jsVars <> contents <> footer)
                     else
                         f $ responseLBS status200 [(hContentType, mimeType)] contents

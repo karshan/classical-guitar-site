@@ -57,7 +57,7 @@ generateCookie :: Key -> User -> IO ByteString
 generateCookie key (User fn ln em _) = do
     currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
     mCookie <- cbcEncrypt' key $ toS $ Aeson.encode $ CookieJSON fn ln em (toS currentTime)
-    either (error "fatal: cbcEncrypt' failed with: ") (return . cookieEncode) mCookie
+    either (error "fatal: cbcEncrypt' failed with: ") (return . cookieEncode) mCookie -- TODO make this non-fatal (return Either)
 
 validateCookie :: Key -> ByteString -> IO (Maybe CookieJSON)
 validateCookie key c = do
