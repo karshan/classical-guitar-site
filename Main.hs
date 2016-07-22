@@ -35,10 +35,12 @@ notFound = responseLBS status404 [] "404 Not Found"
 festivalExists = responseLBS status400 [(hContentType, "text/plain")] "festival with this name already exists"
 loginFailed = responseLBS status403 [(hContentType, "text/plain")] "Laaagin failed, daaaaag"
 notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "Gatta laagin first daaag"
-cookieResponse cookie = responseLBS status302 
-                        [ (hLocation, "/index.html")
-                        , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; HttpOnly;")] -- TODO add secure flag once https
-                        ""
+cookieResponse cookie =
+    responseLBS status302 
+        [ (hLocation, "/index.html")
+        , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; HttpOnly;")] -- TODO add secure flag once https
+        ""
+
 cookieName :: (IsString a) => a
 cookieName = "cgc_sid"
 
@@ -117,6 +119,11 @@ app key db req f
                             f loginFailed)
                     mUser)
             mEmailPass
+    | pathInfo req == ["logout"] = do
+        f $ responseLBS status302 
+                [ (hLocation, "/index.html")
+                , ("Set-Cookie", cookieName <> "= deleted; Path=/; HttpOnly; expires=Thu, 01 Jan 1970 00:00:00 GMT") ]-- TODO add secure flag once https
+                ""
     | otherwise = do
         let path = staticRoot <> intercalate "/" (pathInfo req)
         let filename = last $ pathInfo req
