@@ -66,16 +66,11 @@ app key db req f
                 contents <- LBS.readFile (staticRoot <> "descriptionPrototype.html")
                 mCookieJSON <- getCookieJSON key req
                 let jsVars =
-                        maybe "" 
-                            (\cookieJSON -> 
-                                "<script>user = " <>
-                                    Aeson.encode cookieJSON <> ";\n" <>
-                                    "festival = " <> Aeson.encode festival <>
-                                    ";</script>")
-                            mCookieJSON
-                f $ responseLBS status200 [(hContentType, "text/html")] (header <> jsVars <> contents <> footer)
-
-                )
+                        [("festival", Aeson.encode festival)] <>
+                            maybe []
+                                (\cookieJSON -> [("user", Aeson.encode cookieJSON)])
+                                mCookieJSON
+                f $ responseLBS status200 [(hContentType, "text/html")] (header <> renderJsVars jsVars <> contents <> footer))
             mFestival
     | pathInfo req == ["registerFestival"] = do
         mCookieJSON <- getCookieJSON key req
@@ -138,13 +133,12 @@ app key db req f
                         header <- LBS.readFile (staticRoot <> "header.html")
                         footer <- LBS.readFile (staticRoot <> "footer.html")
                         mCookieJSON <- getCookieJSON key req
+                        festivals <- runDB db getFestivals -- TODO only for index.html ?
                         let jsVars =
-                                maybe "" 
-                                    (\cookieJSON -> 
-                                        "<script>user = " <>
-                                            Aeson.encode cookieJSON <>
-                                            ";</script>")
-                                    mCookieJSON
-                        f $ responseLBS status200 [(hContentType, mimeType)] (header <> jsVars <> contents <> footer)
+                                [("festivals", Aeson.encode festivals)] <>
+                                    maybe []
+                                        (\cookieJSON -> [("user", Aeson.encode cookieJSON)])
+                                        mCookieJSON
+                        f $ responseLBS status200 [(hContentType, mimeType)] (header <> renderJsVars jsVars <> contents <> footer)
                     else
                         f $ responseLBS status200 [(hContentType, mimeType)] contents

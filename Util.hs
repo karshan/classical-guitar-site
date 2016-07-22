@@ -2,12 +2,16 @@
 module Util where
 
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as LBS
 import Data.String.Conv (toS)
 import Data.List.Split
 import Network.HTTP.Types.URI (urlDecode)
 import qualified Data.ByteString            as BS (map)
 import qualified Data.ByteString.Base64.URL as URL
 import Data.Char (ord, isSpace)
+import Data.Aeson (ToJSON)
+import qualified Data.Aeson as Aeson (encode)
+import Data.Monoid
 
 parseRequestBody :: ByteString -> [(String, String)]
 parseRequestBody b = map f $ map (splitOn "=") $ splitOn "&" $ toS b
@@ -30,3 +34,7 @@ trim = takeWhile (not . isSpace) . dropWhile isSpace
 
 parseCookies :: ByteString -> [(String, String)]
 parseCookies = map (\(a:b:_) -> (a,b)) . filter ((>= 2) . length) . map (splitOn "=" . trim) . splitOn ";" . toS
+
+renderJsVars :: [(LBS.ByteString, LBS.ByteString)] -> LBS.ByteString
+renderJsVars vars =
+    "<script>" <> LBS.concat (map (\(var, val) -> var <> " = " <> val <> ";\n") vars) <> "</script>"
