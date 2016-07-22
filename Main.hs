@@ -30,7 +30,11 @@ main = do
     run port (app key db)
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
-loginFailed = responseLBS status400 [(hContentType, "text/plain")] "Laaagin failed, daaaaag"
+userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
+notFound = responseLBS status404 [] "404 Not Found"
+festivalExists = responseLBS status400 [(hContentType, "text/plain")] "festival with this name already exists"
+loginFailed = responseLBS status403 [(hContentType, "text/plain")] "Laaagin failed, daaaaag"
+notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "Gatta laagin first daaag"
 cookieResponse cookie = responseLBS status302 
                         [ (hLocation, "/index.html")
                         , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; HttpOnly;")] -- TODO add secure flag once https
@@ -51,18 +55,54 @@ app :: Key -> DBContext -> Application
 app key db req f
     | pathInfo req == [] =
         f $ responseLBS status301 [(hLocation, "/index.html")] ""
+    | head (pathInfo req) == "festivals" && length (pathInfo req) == 2 = do
+        let reqFestivalName = (pathInfo req) !! 1
+        festivals <- runDB db getFestivals
+        let mFestival = find ((toS reqFestivalName ==) . _festivalName) festivals
+        maybe (f notFound)
+            (\festival -> do
+                header <- LBS.readFile (staticRoot <> "header.html")
+                footer <- LBS.readFile (staticRoot <> "footer.html")
+                contents <- LBS.readFile (staticRoot <> "descriptionPrototype.html")
+                mCookieJSON <- getCookieJSON key req
+                let jsVars =
+                        maybe "" 
+                            (\cookieJSON -> 
+                                "<script>user = " <>
+                                    Aeson.encode cookieJSON <> ";\n" <>
+                                    "festival = " <> Aeson.encode festival <>
+                                    ";</script>")
+                            mCookieJSON
+                f $ responseLBS status200 [(hContentType, "text/html")] (header <> jsVars <> contents <> footer)
+
+                )
+            mFestival
     | pathInfo req == ["registerFestival"] = do
-        print =<< requestBody req
-        f $ responseLBS status200 [(hContentType, "text/plain")] "shit happening yo"
+        mCookieJSON <- getCookieJSON key req
+        maybe (f notAuthorized)
+            (\cookieJSON -> do
+                rawReq <- toS <$> requestBody req
+                let mFestival = createFestival rawReq cookieJSON
+                maybe (f badRequest)
+                    (\festival -> do
+                        success <- runDB db (addFestival festival)
+                        if success then
+                            f $ responseLBS status200 [(hContentType, "text/plain")] "Festival Added"
+                        else
+                            f festivalExists)
+                    mFestival)
+            mCookieJSON
     | pathInfo req == ["register"] = do
         registerReq <- parseRequestBody <$> requestBody req
         mUser <- createUser registerReq
         maybe (putStrLn ("register failed: " ++ (show registerReq)) >> f badRequest) 
             (\user -> do 
-                putStrLn $ "registered a user: " ++ (show user)
-                runDB db (addUser user)
-                cookie <- generateCookie key user
-                f $ cookieResponse cookie)
+                success <- runDB db (addUser user)
+                if success then do
+                    cookie <- generateCookie key user
+                    f $ cookieResponse cookie
+                else
+                    f userExists)
             mUser
     | pathInfo req == ["login"] = do
         loginReq <- parseRequestBody <$> requestBody req
@@ -83,16 +123,15 @@ app key db req f
                     mUser)
             mEmailPass
     | otherwise = do
-        let notFound = f $ responseLBS status404 [] "404 Not Found"
         let path = staticRoot <> intercalate "/" (pathInfo req)
         let filename = last $ pathInfo req
         if "../" `isInfixOf` path then -- no path traversal for you
-            notFound
+            f notFound
         else do
             result :: Either SomeException LBS.ByteString <- try $ LBS.readFile $ toS path
             case result of
                 Left _ ->
-                    notFound
+                    f notFound
                 Right contents -> do
                     let mimeType = defaultMimeLookup filename
                     if mimeType == "text/html" then do

@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric  #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DeriveGeneric      #-}
 module Laajic where
 
 import DB
@@ -17,6 +18,8 @@ import           Data.Time.Clock            (diffUTCTime, getCurrentTime)
 import GHC.Generics (Generic)
 import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as Aeson (decode, encode)
+import Data.Aeson.Lens
+import Control.Lens
 import Util
 
 type Salt = ByteString
@@ -44,6 +47,18 @@ createUser req = do
                      <*> lookup "userEmail" req
                      <*> return passwordHash)) (lookup "userPassword" req)
 
+createFestival :: String -> CookieJSON -> Maybe Festival
+createFestival rawJSON cookieJSON = do
+    let mEventName = (^? _String) =<< (rawJSON ^? key "eventName")
+    maybe Nothing
+        (\eventName -> Just $ Festival {
+            _ownerEmail = Laajic.email cookieJSON
+          , _festivalName = toS eventName
+          , _rawJSON = rawJSON
+        })
+        mEventName
+    
+
 type Key = ByteString
 
 data CookieJSON = CookieJSON {
@@ -52,6 +67,10 @@ data CookieJSON = CookieJSON {
   , email :: String
   , creationTime :: String
 } deriving (Generic, ToJSON, FromJSON)
+
+deriving instance Generic Festival
+deriving instance ToJSON Festival
+deriving instance FromJSON Festival
 
 generateCookie :: Key -> User -> IO ByteString
 generateCookie key (User fn ln em _) = do
