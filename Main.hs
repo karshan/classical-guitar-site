@@ -31,7 +31,7 @@ main = do
     putStrLn $ "Listening on port " ++ show port
     db <- openDB "database.acid"
     key <- getRandomBytes 32
-    (googClientId, googClientSecret) <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "googoauthcreds"
+    (googClientId, googClientSecret) <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "googleoauthcreds"
     runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app (googClientId, googClientSecret) key db)
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
@@ -49,8 +49,8 @@ cookieResponse cookie =
 cookieName :: (IsString a) => a
 cookieName = "cgc_sid"
 
-oauthRedirectUri :: (IsString a) => a
-oauthRedirectUri = "https://2password.io"
+googleOauthRedirectUri :: (IsString a) => a
+googleOauthRedirectUri = "https://2password.io/googleoauth"
 
 getCookieJSON :: Key -> Request -> IO (Maybe CookieJSON)
 getCookieJSON key req = do
@@ -137,7 +137,7 @@ app (googClientId, googClientSecret) encryptionKey db req f
                     [ ("code" :: ByteString, code)
                     , ("client_id", googClientId)
                     , ("client_secret", googClientSecret)
-                    , ("redirect_uri", oauthRedirectUri)
+                    , ("redirect_uri", googleOauthRedirectUri)
                     , ("grant_type", "authorization_code")
                     ]
                 let mToken = (\(json :: ByteString) -> (json ^? key "access_token") >>= (^? _String)) $ toS $ codeResp ^. responseBody
