@@ -27,7 +27,7 @@ main = do
     putStrLn $ "Listening on port " ++ show port
     db <- openDB "database.acid"
     key <- getRandomBytes 32
-    run port (app key db)
+    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app key db)
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
 userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
@@ -38,7 +38,7 @@ notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "Gatta laag
 cookieResponse cookie =
     responseLBS status302 
         [ (hLocation, "/index.html")
-        , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; HttpOnly;")] -- TODO add secure flag once https
+        , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; Secure; HttpOnly;")]
         ""
 
 cookieName :: (IsString a) => a
@@ -122,7 +122,7 @@ app key db req f
     | pathInfo req == ["logout"] = do
         f $ responseLBS status302 
                 [ (hLocation, "/index.html")
-                , ("Set-Cookie", cookieName <> "= deleted; Path=/; HttpOnly; expires=Thu, 01 Jan 1970 00:00:00 GMT") ]-- TODO add secure flag once https
+                , ("Set-Cookie", cookieName <> "= deleted; Path=/; Secure; HttpOnly; expires=Thu, 01 Jan 1970 00:00:00 GMT") ]
                 ""
     | otherwise = do
         let path = staticRoot <> intercalate "/" (pathInfo req)
