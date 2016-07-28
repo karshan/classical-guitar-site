@@ -18,6 +18,10 @@ import DB
 import Laajic
 import Crypto.Random (getRandomBytes)
 import qualified Data.Aeson as Aeson (encode)
+import Data.Aeson.Lens
+import Control.Lens
+import Network.Wreq hiding (cookieName)
+import Control.Monad
 
 staticRoot :: IsString a => a
 staticRoot = "cgc/"
@@ -27,7 +31,8 @@ main = do
     putStrLn $ "Listening on port " ++ show port
     db <- openDB "database.acid"
     key <- getRandomBytes 32
-    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app key db)
+    (googClientId, googClientSecret) <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "googoauthcreds"
+    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app (googClientId, googClientSecret) key db)
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
 userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
@@ -44,6 +49,9 @@ cookieResponse cookie =
 cookieName :: (IsString a) => a
 cookieName = "cgc_sid"
 
+oauthRedirectUri :: (IsString a) => a
+oauthRedirectUri = "https://2password.io"
+
 getCookieJSON :: Key -> Request -> IO (Maybe CookieJSON)
 getCookieJSON key req = do
     let mCookie = (do
@@ -53,8 +61,10 @@ getCookieJSON key req = do
         (\cookie -> validateCookie key $ toS cookie)
         mCookie
 
-app :: Key -> DBContext -> Application
-app key db req f
+type GoogOauthCreds = (ByteString, ByteString)
+
+app :: GoogOauthCreds -> Key -> DBContext -> Application
+app (googClientId, googClientSecret) encryptionKey db req f
     | pathInfo req == [] =
         f $ responseLBS status301 [(hLocation, "/index.html")] ""
     | head (pathInfo req) == "festivals" && length (pathInfo req) == 2 = do
@@ -66,7 +76,7 @@ app key db req f
                 header <- LBS.readFile (staticRoot <> "header.html")
                 footer <- LBS.readFile (staticRoot <> "footer.html")
                 contents <- LBS.readFile (staticRoot <> "descriptionPrototype.html")
-                mCookieJSON <- getCookieJSON key req
+                mCookieJSON <- getCookieJSON encryptionKey req
                 let jsVars =
                         [("festival", Aeson.encode festival)] <>
                             maybe []
@@ -75,7 +85,7 @@ app key db req f
                 f $ responseLBS status200 [(hContentType, "text/html")] (header <> renderJsVars jsVars <> contents <> footer))
             mFestival
     | pathInfo req == ["registerFestival"] = do
-        mCookieJSON <- getCookieJSON key req
+        mCookieJSON <- getCookieJSON encryptionKey req
         maybe (f notAuthorized)
             (\cookieJSON -> do
                 rawReq <- toS <$> requestBody req
@@ -96,7 +106,7 @@ app key db req f
             (\user -> do 
                 success <- runDB db (addUser user)
                 if success then do
-                    cookie <- generateCookie key user
+                    cookie <- generateNativeCookie encryptionKey user
                     f $ cookieResponse cookie
                 else
                     f userExists)
@@ -113,12 +123,45 @@ app key db req f
                 maybe (f loginFailed)
                     (\user ->
                         if validatePasswordHash (_passwordHash user) password then do
-                            cookie <- generateCookie key user
+                            cookie <- generateNativeCookie encryptionKey user
                             f $ cookieResponse cookie
                         else
                             f loginFailed)
                     mUser)
             mEmailPass
+    | pathInfo req == ["googleoauth"] = do
+        -- TODO error logging (todo use display name instead of firstname last name ??
+        maybe (f badRequest)
+            (\code -> do
+                codeResp <- post "https://www.googleapis.com/oauth2/v4/token"
+                    [ ("code" :: ByteString, code)
+                    , ("client_id", googClientId)
+                    , ("client_secret", googClientSecret)
+                    , ("redirect_uri", oauthRedirectUri)
+                    , ("grant_type", "authorization_code")
+                    ]
+                let mToken = (\(json :: ByteString) -> (json ^? key "access_token") >>= (^? _String)) $ toS $ codeResp ^. responseBody
+                maybe (f badRequest)
+                    (\accessToken -> do
+                        emailResp <- get ("https://www.googleapis.com/plus/v1/people/me?access_token=" <> toS accessToken)
+                        let mEmail = toS <$> ((\(json :: ByteString) -> (json ^? key "emails") >>=
+                                (^? _Array) >>=
+                                (^? ix 0) >>=
+                                (^? key "value") >>=
+                                (^? _String)) $ toS $ emailResp ^. responseBody)
+                        let mFirstName = toS <$> ((\(json :: ByteString) -> (json ^? key "name") >>=
+                                (^? key "givenName") >>=
+                                (^? _String)) $ toS $ emailResp ^. responseBody)
+                        let mLastName = toS <$> ((\(json :: ByteString) -> (json ^? key "name") >>=
+                                (^? key "familyName") >>= 
+                                (^? _String)) $ toS $ emailResp ^. responseBody)
+                        maybe (f badRequest)
+                            (\userInfo -> do
+                                cookie <- generateCookie encryptionKey Google userInfo
+                                f $ cookieResponse cookie)
+                            ((,,) <$> mFirstName <*> mLastName <*> mEmail))
+                    mToken)
+            (join (lookup "code" (queryString req)))
     | pathInfo req == ["logout"] = do
         f $ responseLBS status302 
                 [ (hLocation, "/index.html")
@@ -139,7 +182,7 @@ app key db req f
                     if mimeType == "text/html" then do
                         header <- LBS.readFile (staticRoot <> "header.html")
                         footer <- LBS.readFile (staticRoot <> "footer.html")
-                        mCookieJSON <- getCookieJSON key req
+                        mCookieJSON <- getCookieJSON encryptionKey req
                         festivals <- runDB db getFestivals -- TODO only for index.html ?
                         let jsVars =
                                 [("festivals", Aeson.encode festivals)] <>

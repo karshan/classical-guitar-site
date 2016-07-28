@@ -61,10 +61,14 @@ createFestival rawJSON cookieJSON = do
 
 type Key = ByteString
 
+data AccountType = Native | Google
+    deriving (Generic, ToJSON, FromJSON)
+
 data CookieJSON = CookieJSON {
     firstName :: String
   , lastName :: String
   , email :: String
+  , accountType :: AccountType
   , creationTime :: String
 } deriving (Generic, ToJSON, FromJSON)
 
@@ -72,11 +76,15 @@ deriving instance Generic Festival
 deriving instance ToJSON Festival
 deriving instance FromJSON Festival
 
-generateCookie :: Key -> User -> IO ByteString
-generateCookie key (User fn ln em _) = do
+generateCookie :: Key -> AccountType -> (String, String, String) -> IO ByteString
+generateCookie key acType (fn, ln, em) = do
     currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
-    mCookie <- cbcEncrypt' key $ toS $ Aeson.encode $ CookieJSON fn ln em (toS currentTime)
+    mCookie <- cbcEncrypt' key $ toS $ Aeson.encode $ CookieJSON fn ln em acType (toS currentTime)
     either (error "fatal: cbcEncrypt' failed with: ") (return . cookieEncode) mCookie -- TODO make this non-fatal (return Either)
+
+generateNativeCookie :: Key -> User -> IO ByteString
+generateNativeCookie key (User fn ln em _) =
+    generateCookie key Native (fn, ln, em)
 
 validateCookie :: Key -> ByteString -> IO (Maybe CookieJSON)
 validateCookie key c = do

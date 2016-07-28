@@ -39,5 +39,6 @@ executable classical-guitar-site
                      , time
                      , aeson
                      , lens-aeson
+                     , wreq
   -- hs-source-dirs:      
   default-language:    Haskell2010
