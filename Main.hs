@@ -31,8 +31,9 @@ main = do
     putStrLn $ "Listening on port " ++ show port
     db <- openDB "database.acid"
     key <- getRandomBytes 32
-    (googClientId, googClientSecret) <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "googleoauthcreds"
-    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app (googClientId, googClientSecret) key db)
+    googCreds <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "googleoauthcreds"
+    facebookCreds <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "facebookoauthcreds"
+    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app googCreds facebookCreds key db)
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
 userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
@@ -52,6 +53,9 @@ cookieName = "cgc_sid"
 googleOauthRedirectUri :: (IsString a) => a
 googleOauthRedirectUri = "https://2password.io/googleoauth"
 
+facebookOauthRedirectUri :: (IsString a) => a
+facebookOauthRedirectUri = "https://2password.io/facebookoauth"
+
 getCookieJSON :: Key -> Request -> IO (Maybe CookieJSON)
 getCookieJSON key req = do
     let mCookie = (do
@@ -62,9 +66,10 @@ getCookieJSON key req = do
         mCookie
 
 type GoogOauthCreds = (ByteString, ByteString)
+type FacebookOauthCreds = (ByteString, ByteString)
 
-app :: GoogOauthCreds -> Key -> DBContext -> Application
-app (googClientId, googClientSecret) encryptionKey db req f
+app :: GoogOauthCreds -> FacebookOauthCreds -> Key -> DBContext -> Application
+app (googClientId, googClientSecret) (facebookClientId, facebookClientSecret) encryptionKey db req f
     | pathInfo req == [] =
         f $ responseLBS status301 [(hLocation, "/index.html")] ""
     | head (pathInfo req) == "festivals" && length (pathInfo req) == 2 = do
@@ -130,7 +135,9 @@ app (googClientId, googClientSecret) encryptionKey db req f
                     mUser)
             mEmailPass
     | pathInfo req == ["googleoauth"] = do
-        -- TODO error logging (todo use display name instead of firstname last name ??
+        -- TODO error logging
+        -- TODO disable wreq exceptions (but log them ?)
+        -- TODO use display name instead of firstname last name ??
         maybe (f badRequest)
             (\code -> do
                 codeResp <- post "https://www.googleapis.com/oauth2/v4/token"
@@ -143,21 +150,52 @@ app (googClientId, googClientSecret) encryptionKey db req f
                 let mToken = (\(json :: ByteString) -> (json ^? key "access_token") >>= (^? _String)) $ toS $ codeResp ^. responseBody
                 maybe (f badRequest)
                     (\accessToken -> do
-                        emailResp <- get ("https://www.googleapis.com/plus/v1/people/me?access_token=" <> toS accessToken)
+                        emailResp <- (toS . (^. responseBody)) <$> get 
+                            ("https://www.googleapis.com/plus/v1/people/me?access_token=" <> toS accessToken)
                         let mEmail = toS <$> ((\(json :: ByteString) -> (json ^? key "emails") >>=
                                 (^? _Array) >>=
                                 (^? ix 0) >>=
                                 (^? key "value") >>=
-                                (^? _String)) $ toS $ emailResp ^. responseBody)
+                                (^? _String)) emailResp)
                         let mFirstName = toS <$> ((\(json :: ByteString) -> (json ^? key "name") >>=
                                 (^? key "givenName") >>=
-                                (^? _String)) $ toS $ emailResp ^. responseBody)
+                                (^? _String)) emailResp)
                         let mLastName = toS <$> ((\(json :: ByteString) -> (json ^? key "name") >>=
                                 (^? key "familyName") >>= 
-                                (^? _String)) $ toS $ emailResp ^. responseBody)
+                                (^? _String)) emailResp)
                         maybe (f badRequest)
                             (\userInfo -> do
                                 cookie <- generateCookie encryptionKey Google userInfo
+                                f $ cookieResponse cookie)
+                            ((,,) <$> mFirstName <*> mLastName <*> mEmail))
+                    mToken)
+            (join (lookup "code" (queryString req)))
+    | pathInfo req == ["facebookoauth"] = do
+        -- TODO error logging
+        -- TODO disable wreq exceptions (but log them ?)
+        -- TODO use name instead of first_name+last_name ?
+        maybe (f badRequest)
+            (\code -> do
+                codeResp <- get ("https://graph.facebook.com/v2.3/oauth/access_token?client_id=" <>
+                    toS facebookClientId <>
+                    "&client_secret=" <> toS facebookClientSecret <>
+                    "&redirect_uri=" <> facebookOauthRedirectUri <>
+                    "&code=" <> toS code)
+                let mToken = (\(json :: ByteString) -> (json ^? key "access_token") >>= (^? _String)) $ toS $ codeResp ^. responseBody
+                maybe (f badRequest)
+                    (\accessToken -> do
+                        emailResp <- (toS . (^.responseBody)) <$> get 
+                            ("https://graph.facebook.com/v2.3/me?fields=email,name,first_name,last_name&access_token=" <>
+                                toS accessToken)
+                        let mEmail = toS <$> ((\(json :: ByteString) -> (json ^? key "email") >>=
+                                (^? _String)) emailResp)
+                        let mFirstName = toS <$> ((\(json :: ByteString) -> (json ^? key "first_name") >>=
+                                (^? _String)) emailResp)
+                        let mLastName = toS <$> ((\(json :: ByteString) -> (json ^? key "last_name") >>=
+                                (^? _String)) emailResp)
+                        maybe (f badRequest)
+                            (\userInfo -> do
+                                cookie <- generateCookie encryptionKey Facebook userInfo
                                 f $ cookieResponse cookie)
                             ((,,) <$> mFirstName <*> mLastName <*> mEmail))
                     mToken)

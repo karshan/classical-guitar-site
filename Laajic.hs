@@ -61,7 +61,7 @@ createFestival rawJSON cookieJSON = do
 
 type Key = ByteString
 
-data AccountType = Native | Google
+data AccountType = Native | Google | Facebook
     deriving (Generic, ToJSON, FromJSON)
 
 data CookieJSON = CookieJSON {
