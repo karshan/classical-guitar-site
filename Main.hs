@@ -51,10 +51,10 @@ cookieName :: (IsString a) => a
 cookieName = "cgc_sid"
 
 googleOauthRedirectUri :: (IsString a) => a
-googleOauthRedirectUri = "https://2password.io/googleoauth"
+googleOauthRedirectUri = "https://classicalguitarcalendar.com/googleoauth"
 
 facebookOauthRedirectUri :: (IsString a) => a
-facebookOauthRedirectUri = "https://2password.io/facebookoauth"
+facebookOauthRedirectUri = "https://classicalguitarcalendar.com/facebookoauth"
 
 getCookieJSON :: Key -> Request -> IO (Maybe CookieJSON)
 getCookieJSON key req = do
