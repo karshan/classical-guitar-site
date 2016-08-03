@@ -20,7 +20,11 @@ import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Aeson as Aeson (decode, encode)
 import Data.Aeson.Lens
 import Control.Lens
+import Control.Monad
+import Data.Monoid
+import Network.Wreq
 import Util
+import Common
 
 type Salt = ByteString
 
@@ -45,7 +49,24 @@ createUser req = do
         return (User <$> lookup "userFirstName" req
                      <*> lookup "userLastName" req
                      <*> lookup "userEmail" req
-                     <*> return passwordHash)) (lookup "userPassword" req)
+                     <*> return passwordHash
+                     <*> return False)) (lookup "userPassword" req)
+
+-- TODO check for failure and return Bool
+sendVerificationEmail :: ByteString -> Key -> User -> IO ()
+sendVerificationEmail mailgunKey key user = do
+    activationLink_ <- activationLink key user
+    let authVal = basicAuth "api" mailgunKey
+    let opts = defaults & auth ?~ authVal
+    void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/message"
+        [ ("from" :: ByteString, "Classical Guitar Calendar <noreply@classicalguitarcalendar.com>" :: ByteString)
+        , ("to", toS $ _email user)
+        , ("subject", "Activate your account")
+        , ("text", "Hey " <> toS (_firstName user) <> " " <> toS (_lastName user) <>
+            ",\nActivate your account by visiting this link: " <> activationLink_)
+        , ("html", "<p>Hey " <> toS (_firstName user) <> " " <> toS (_lastName user) <>
+            ",\nActivate your account by visiting this <a href=\"" <> activationLink_ <> "\">link</a></p>")
+        ]
 
 createFestival :: String -> CookieJSON -> Maybe Festival
 createFestival rawJSON cookieJSON = do
@@ -57,11 +78,13 @@ createFestival rawJSON cookieJSON = do
           , _rawJSON = rawJSON
         })
         mEventName
-    
 
 type Key = ByteString
 
-data AccountType = Native | Google | Facebook
+data AccountType =
+    Native Bool -- isActivated?
+  | Google
+  | Facebook
     deriving (Generic, ToJSON, FromJSON)
 
 data CookieJSON = CookieJSON {
@@ -76,15 +99,45 @@ deriving instance Generic Festival
 deriving instance ToJSON Festival
 deriving instance FromJSON Festival
 
+data ActivationLinkJSON = ActivationLinkJSON {
+    actEmail :: String
+  , actCreationTime :: String
+} deriving (Generic, ToJSON, FromJSON)
+
+activationLink :: Key -> User -> IO ByteString
+activationLink key user = do
+    currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
+    mToken <- cbcEncrypt' key $ toS $ Aeson.encode $ ActivationLinkJSON (_email user) (toS currentTime)
+    either (\s -> error $ "fatal: cbcEncrypt' failed with: " <> s)
+        (\token -> return (serverBaseUrl <> "activate?token=" <> token))
+        mToken
+
+validateActivationToken :: Key -> ByteString -> IO (Maybe String)
+validateActivationToken key token = do
+    let eightHours = 8 * 60 * 60
+    currentTime <- getCurrentTime
+    let mToken = either (const Nothing) Just $ cbcDecrypt' key $ cookieDecode token
+    maybe (return Nothing) 
+        (\activationLinkJSON -> do
+            let mCreationTime = parseTimeM True defaultTimeLocale "%s" $ toS $ actCreationTime activationLinkJSON
+            maybe (return Nothing)
+                (\creationTime_ -> 
+                    if currentTime `diffUTCTime` creationTime_ < eightHours then
+                        return (Just $ actEmail activationLinkJSON)
+                    else
+                        return Nothing) 
+                mCreationTime)
+        (Aeson.decode . toS =<< mToken)
+
 generateCookie :: Key -> AccountType -> (String, String, String) -> IO ByteString
 generateCookie key acType (fn, ln, em) = do
     currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
     mCookie <- cbcEncrypt' key $ toS $ Aeson.encode $ CookieJSON fn ln em acType (toS currentTime)
-    either (error "fatal: cbcEncrypt' failed with: ") (return . cookieEncode) mCookie -- TODO make this non-fatal (return Either)
+    either (\s -> error $ "fatal: cbcEncrypt' failed with: " <> s) (return . cookieEncode) mCookie -- TODO make this non-fatal (return Either)
 
 generateNativeCookie :: Key -> User -> IO ByteString
-generateNativeCookie key (User fn ln em _) =
-    generateCookie key Native (fn, ln, em)
+generateNativeCookie key (User fn ln em _ act) =
+    generateCookie key (Native act) (fn, ln, em)
 
 validateCookie :: Key -> ByteString -> IO (Maybe CookieJSON)
 validateCookie key c = do

@@ -22,7 +22,8 @@ import           Data.Acid                   (AcidState, Query, Update, makeAcid
                                               openLocalStateFrom, query, update)
 import           Data.ByteString             (ByteString)
 import           Data.SafeCopy               (base, deriveSafeCopy)
-import           Data.List                   (find)
+import           Data.Foldable               (find)
+import           Data.Set
 import           Data.Aeson                  (FromJSON, ToJSON)
 
 type DBContext = AcidState Database
@@ -30,24 +31,25 @@ type DBContext = AcidState Database
 data PasswordHash = PasswordHash {
     _salt :: ByteString
   , _hash :: ByteString
-} deriving (Eq, Show)
+} deriving (Eq, Show, Ord)
 
 data User = User {
     _firstName :: String
   , _lastName :: String
-  , _email :: String
+  , _email :: String -- Primary Key
   , _passwordHash :: PasswordHash
-} deriving (Eq, Show)
+  , _activated :: Bool
+} deriving (Eq, Show, Ord)
 
 data Festival = Festival {
     _ownerEmail :: String
-  , _festivalName :: String -- for URL
+  , _festivalName :: String -- for URL so Primary Key
   , _rawJSON :: String
-} deriving (Eq, Show)
+} deriving (Eq, Show, Ord)
 
 data Database = Database {
-    _users :: [User]
-  , _festivals :: [Festival]
+    _users :: Set User
+  , _festivals :: Set Festival
 }
 
 makeLenses ''PasswordHash
@@ -60,19 +62,30 @@ $(deriveSafeCopy 0 'base ''User)
 $(deriveSafeCopy 0 'base ''PasswordHash)
 $(deriveSafeCopy 0 'base ''Festival)
 
-getUsers_ :: Query Database [User]
+getUsers_ :: Query Database (Set User)
 getUsers_ = view users <$> ask
 
--- returns false if user with same email already exists
-addUser_ :: User -> Update Database Bool
+-- If a user with the same email already exists the user is not added and the existing user is returned
+addUser_ :: User -> Update Database (Maybe User)
 addUser_ user = do
     db <- get
     let mExistingUser = find ((_email user ==) . _email) (db ^. users)
-    maybe (put ((users %~ (user:)) db) >> return True)
-        (const $ return False)
+    maybe (put ((users %~ (insert user)) db) >> return Nothing)
+        (return . Just)
         mExistingUser
 
-getFestivals_ :: Query Database [Festival]
+-- returns Nothing if the user with specified email wasn't found
+activateUser_ :: String -> Update Database (Maybe User)
+activateUser_ email = do
+    db <- get
+    let mUser = find ((email ==) . _email) (db ^. users)
+    maybe (return Nothing)
+        (\user -> do
+            let activatedUser = user & activated .~ True
+            put ((users %~ (insert activatedUser . delete user)) db) >> return (Just activatedUser))
+        mUser
+
+getFestivals_ :: Query Database (Set Festival)
 getFestivals_ = view festivals <$> ask
 
 -- returns false if festival with same name already exists
@@ -80,12 +93,13 @@ addFestival_ :: Festival -> Update Database Bool
 addFestival_ festival = do
     db <- get
     let mExistingFestival = find ((_festivalName festival ==) . _festivalName) (db ^. festivals)
-    maybe (put ((festivals %~ (festival:)) db) >> return True)
+    maybe (put ((festivals %~ (insert festival)) db) >> return True)
         (const $ return False)
         mExistingFestival
 
 $(makeAcidic ''Database [ 'getUsers_
                         , 'addUser_
+                        , 'activateUser_
                         , 'getFestivals_
                         , 'addFestival_ ])
 
@@ -96,20 +110,23 @@ runDB :: DBContext -> DB a -> IO a
 runDB db (DB a) = runReaderT a db
 
 openDB :: FilePath -> IO DBContext
-openDB fp = openLocalStateFrom fp (Database [] [])
+openDB fp = openLocalStateFrom fp (Database empty empty)
 
 update' a = liftIO . update a
 query' a = liftIO . query a
 
 --TODO generate with TemplateHaskell
-addUser :: User -> DB Bool
+addUser :: User -> DB (Maybe User)
 addUser user = (`update'` AddUser_ user) =<< ask
 
-getUsers :: DB [User]
+activateUser :: String -> DB (Maybe User)
+activateUser email = (`update'` ActivateUser_ email) =<< ask
+
+getUsers :: DB (Set User)
 getUsers = (`query'` GetUsers_) =<< ask
 
 addFestival :: Festival -> DB Bool
 addFestival festival = (`update'` AddFestival_ festival) =<< ask
 
-getFestivals :: DB [Festival]
+getFestivals :: DB (Set Festival)
 getFestivals = (`query'` GetFestivals_) =<< ask

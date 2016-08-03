@@ -22,6 +22,7 @@ import Data.Aeson.Lens
 import Control.Lens
 import Network.Wreq hiding (cookieName)
 import Control.Monad
+import Common
 
 staticRoot :: IsString a => a
 staticRoot = "cgc/"
@@ -33,10 +34,13 @@ main = do
     key <- getRandomBytes 32
     googCreds <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "googleoauthcreds"
     facebookCreds <- (\[a,b] -> (a,b)) . map toS . lines <$> readFile "facebookoauthcreds"
-    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app googCreds facebookCreds key db)
+    mailgunKey <- toS . head . lines <$> readFile "mailgunkey"
+    runSettings (setPort port $ setHost "127.0.0.1" defaultSettings) (app mailgunKey googCreds facebookCreds key db)
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
 userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
+verifyEmail = responseLBS status200 [(hContentType, "text/plain")] "Please verify your email by clicking the link in the email we sent you"
+accountActivated email = responseLBS status200 [(hContentType, "text/plain")] (email <> ", you're account has been activated")
 notFound = responseLBS status404 [] "404 Not Found"
 festivalExists = responseLBS status400 [(hContentType, "text/plain")] "festival with this name already exists"
 loginFailed = responseLBS status403 [(hContentType, "text/plain")] "Laaagin failed, daaaaag"
@@ -50,11 +54,11 @@ cookieResponse cookie =
 cookieName :: (IsString a) => a
 cookieName = "cgc_sid"
 
-googleOauthRedirectUri :: (IsString a) => a
-googleOauthRedirectUri = "https://classicalguitarcalendar.com/googleoauth"
+googleOauthRedirectUri :: (Monoid a, IsString a) => a
+googleOauthRedirectUri = serverBaseUrl <> "googleoauth"
 
-facebookOauthRedirectUri :: (IsString a) => a
-facebookOauthRedirectUri = "https://classicalguitarcalendar.com/facebookoauth"
+facebookOauthRedirectUri :: (Monoid a, IsString a) => a
+facebookOauthRedirectUri = serverBaseUrl <> "facebookoauth"
 
 getCookieJSON :: Key -> Request -> IO (Maybe CookieJSON)
 getCookieJSON key req = do
@@ -68,8 +72,8 @@ getCookieJSON key req = do
 type GoogOauthCreds = (ByteString, ByteString)
 type FacebookOauthCreds = (ByteString, ByteString)
 
-app :: GoogOauthCreds -> FacebookOauthCreds -> Key -> DBContext -> Application
-app (googClientId, googClientSecret) (facebookClientId, facebookClientSecret) encryptionKey db req f
+app :: ByteString -> GoogOauthCreds -> FacebookOauthCreds -> Key -> DBContext -> Application
+app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClientSecret) encryptionKey db req f
     | pathInfo req == [] =
         f $ responseLBS status301 [(hLocation, "/index.html")] ""
     | head (pathInfo req) == "festivals" && length (pathInfo req) == 2 = do
@@ -109,13 +113,25 @@ app (googClientId, googClientSecret) (facebookClientId, facebookClientSecret) en
         mUser <- createUser registerReq
         maybe (putStrLn ("register failed: " ++ (show registerReq)) >> f badRequest) 
             (\user -> do 
-                success <- runDB db (addUser user)
-                if success then do
-                    cookie <- generateNativeCookie encryptionKey user
-                    f $ cookieResponse cookie
-                else
-                    f userExists)
+                mExistingUser <- runDB db (addUser user)
+                maybe 
+                    (do
+                        sendVerificationEmail mailgunKey encryptionKey user
+                        cookie <- generateNativeCookie encryptionKey user
+                        f $ cookieResponse cookie)
+                    (const $ f userExists)
+                    mExistingUser)
             mUser
+    | pathInfo req == ["activate"] = do
+        maybe (f badRequest)
+            (\token -> do
+                mEmail <- validateActivationToken encryptionKey token
+                maybe (f badRequest)
+                    (\email -> do
+                        runDB db (activateUser email)
+                        f $ accountActivated $ toS email) -- TODO account activated page and set cookies here
+                    mEmail)
+            (join (lookup "token" (queryString req)))
     | pathInfo req == ["login"] = do
         loginReq <- parseRequestBody <$> requestBody req
         let mEmailPass =
