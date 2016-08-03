@@ -96,17 +96,20 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
     | pathInfo req == ["registerFestival"] = do
         mCookieJSON <- getCookieJSON encryptionKey req
         maybe (f notAuthorized)
-            (\cookieJSON -> do
-                rawReq <- toS <$> requestBody req
-                let mFestival = createFestival rawReq cookieJSON
-                maybe (f badRequest)
-                    (\festival -> do
-                        success <- runDB db (addFestival festival)
-                        if success then
-                            f $ responseLBS status200 [(hContentType, "text/plain")] "Festival Added"
-                        else
-                            f festivalExists)
-                    mFestival)
+            (\cookieJSON ->
+                if isActivated cookieJSON == False then
+                    f notAuthorized
+                else do
+                    rawReq <- toS <$> requestBody req
+                    let mFestival = createFestival rawReq cookieJSON
+                    maybe (f badRequest)
+                        (\festival -> do
+                            success <- runDB db (addFestival festival)
+                            if success then
+                                f $ responseLBS status200 [(hContentType, "text/plain")] "Festival Added"
+                            else
+                                f festivalExists)
+                        mFestival)
             mCookieJSON
     | pathInfo req == ["register"] = do
         registerReq <- parseRequestBody <$> requestBody req

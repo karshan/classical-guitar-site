@@ -58,7 +58,7 @@ sendVerificationEmail mailgunKey key user = do
     activationLink_ <- activationLink key user
     let authVal = basicAuth "api" mailgunKey
     let opts = defaults & auth ?~ authVal
-    void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/message"
+    void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/messages"
         [ ("from" :: ByteString, "Classical Guitar Calendar <noreply@classicalguitarcalendar.com>" :: ByteString)
         , ("to", toS $ _email user)
         , ("subject", "Activate your account")
@@ -99,6 +99,13 @@ deriving instance Generic Festival
 deriving instance ToJSON Festival
 deriving instance FromJSON Festival
 
+isActivated :: CookieJSON -> Bool
+isActivated cookieJSON = f (accountType cookieJSON)
+    where
+        f (Native act) = act
+        f Google = True
+        f Facebook = True
+
 data ActivationLinkJSON = ActivationLinkJSON {
     actEmail :: String
   , actCreationTime :: String
@@ -109,7 +116,7 @@ activationLink key user = do
     currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
     mToken <- cbcEncrypt' key $ toS $ Aeson.encode $ ActivationLinkJSON (_email user) (toS currentTime)
     either (\s -> error $ "fatal: cbcEncrypt' failed with: " <> s)
-        (\token -> return (serverBaseUrl <> "activate?token=" <> token))
+        (\token -> return (serverBaseUrl <> "activate?token=" <> (cookieEncode token)))
         mToken
 
 validateActivationToken :: Key -> ByteString -> IO (Maybe String)
