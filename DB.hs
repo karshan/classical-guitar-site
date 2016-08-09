@@ -13,18 +13,18 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 module DB where
 
-import           Control.Lens                (view, (%~), (&), (.~), (^.))
-import           Control.Lens.TH             (makeLenses)
-import           Control.Monad.IO.Class      (MonadIO, liftIO)
-import           Control.Monad.Reader        (MonadReader, ReaderT, ask, runReaderT)
-import           Control.Monad.State         (get, put)
-import           Data.Acid                   (AcidState, Query, Update, makeAcidic,
-                                              openLocalStateFrom, query, update)
-import           Data.ByteString             (ByteString)
-import           Data.SafeCopy               (base, deriveSafeCopy)
-import           Data.Foldable               (find)
+import           Control.Lens           (view, (%~), (&), (.~), (^.))
+import           Control.Lens.TH        (makeLenses)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.Reader   (MonadReader, ReaderT, ask, runReaderT)
+import           Control.Monad.State    (get, put)
+import           Data.Acid              (AcidState, Query, Update, makeAcidic,
+                                         openLocalStateFrom, query, update)
+import           Data.Aeson             (FromJSON, ToJSON)
+import           Data.ByteString        (ByteString)
+import           Data.Foldable          (find)
+import           Data.SafeCopy          (base, deriveSafeCopy)
 import           Data.Set
-import           Data.Aeson                  (FromJSON, ToJSON)
 
 type DBContext = AcidState Database
 
@@ -34,21 +34,21 @@ data PasswordHash = PasswordHash {
 } deriving (Eq, Show, Ord)
 
 data User = User {
-    _firstName :: String
-  , _lastName :: String
-  , _email :: String -- Primary Key
+    _firstName    :: String
+  , _lastName     :: String
+  , _email        :: String -- Primary Key
   , _passwordHash :: PasswordHash
-  , _activated :: Bool
+  , _activated    :: Bool
 } deriving (Eq, Show, Ord)
 
 data Festival = Festival {
-    _ownerEmail :: String
+    _ownerEmail   :: String
   , _festivalName :: String -- for URL so Primary Key
-  , _rawJSON :: String
+  , _rawJSON      :: String
 } deriving (Eq, Show, Ord)
 
 data Database = Database {
-    _users :: Set User
+    _users     :: Set User
   , _festivals :: Set Festival
 }
 

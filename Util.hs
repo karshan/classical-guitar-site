@@ -1,17 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Util where
 
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as LBS
-import Data.String.Conv (toS)
-import Data.List.Split
-import Network.HTTP.Types.URI (urlDecode)
+import           Data.Aeson                 (ToJSON)
+import qualified Data.Aeson                 as Aeson (encode)
+import           Data.ByteString            (ByteString)
 import qualified Data.ByteString            as BS (map)
 import qualified Data.ByteString.Base64.URL as URL
-import Data.Char (ord, isSpace)
-import Data.Aeson (ToJSON)
-import qualified Data.Aeson as Aeson (encode)
-import Data.Monoid
+import qualified Data.ByteString.Lazy       as LBS
+import           Data.Char                  (isSpace, ord)
+import           Data.List.Split
+import           Data.Monoid
+import           Data.String.Conv           (toS)
+import           Network.HTTP.Types.URI     (urlDecode)
 
 parseRequestBody :: ByteString -> [(String, String)]
 parseRequestBody b = map f $ map (splitOn "=") $ splitOn "&" $ toS b

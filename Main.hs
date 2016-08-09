@@ -1,28 +1,29 @@
-{-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
-import Control.Exception (try, SomeException)
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as LBS
-import Data.List (find)
-import Data.Monoid
-import Data.String
-import Data.String.Conv (toS)
-import Data.Text (intercalate, isInfixOf)
-import Network.Mime
-import Network.Wai
-import Network.Wai.Handler.Warp
-import Network.HTTP.Types
-import Network.HTTP.Types.Header
-import Util
-import DB
-import Laajic
-import Crypto.Random (getRandomBytes)
-import qualified Data.Aeson as Aeson (encode)
-import Data.Aeson.Lens
-import Control.Lens
-import Network.Wreq hiding (cookieName)
-import Control.Monad
-import Common
+import           Common
+import           Control.Exception         (SomeException, try)
+import           Control.Lens
+import           Control.Monad
+import           Crypto.Random             (getRandomBytes)
+import qualified Data.Aeson                as Aeson (encode)
+import           Data.Aeson.Lens
+import           Data.ByteString           (ByteString)
+import qualified Data.ByteString.Lazy      as LBS
+import           Data.List                 (find)
+import           Data.Monoid
+import           Data.String
+import           Data.String.Conv          (toS)
+import           Data.Text                 (intercalate, isInfixOf)
+import           DB
+import           Laajic
+import           Network.HTTP.Types
+import           Network.HTTP.Types.Header
+import           Network.Mime
+import           Network.Wai
+import           Network.Wai.Handler.Warp
+import           Network.Wreq              hiding (cookieName)
+import           Util
 
 staticRoot :: IsString a => a
 staticRoot = "cgc/"
@@ -46,7 +47,7 @@ festivalExists = responseLBS status400 [(hContentType, "text/plain")] "festival 
 loginFailed = responseLBS status403 [(hContentType, "text/plain")] "Laaagin failed, daaaaag"
 notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "Gatta laagin first daaag"
 cookieResponse cookie =
-    responseLBS status302 
+    responseLBS status302
         [ (hLocation, "/index.html")
         , ("Set-Cookie", cookieName <> "=" <> cookie <> "; Path=/; Secure; HttpOnly;")]
         ""
@@ -114,10 +115,10 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
     | pathInfo req == ["register"] = do
         registerReq <- parseRequestBody <$> requestBody req
         mUser <- createUser registerReq
-        maybe (putStrLn ("register failed: " ++ (show registerReq)) >> f badRequest) 
-            (\user -> do 
+        maybe (putStrLn ("register failed: " ++ (show registerReq)) >> f badRequest)
+            (\user -> do
                 mExistingUser <- runDB db (addUser user)
-                maybe 
+                maybe
                     (do
                         sendVerificationEmail mailgunKey encryptionKey user
                         cookie <- generateNativeCookie encryptionKey user
@@ -169,7 +170,7 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                 let mToken = (\(json :: ByteString) -> (json ^? key "access_token") >>= (^? _String)) $ toS $ codeResp ^. responseBody
                 maybe (f badRequest)
                     (\accessToken -> do
-                        emailResp <- (toS . (^. responseBody)) <$> get 
+                        emailResp <- (toS . (^. responseBody)) <$> get
                             ("https://www.googleapis.com/plus/v1/people/me?access_token=" <> toS accessToken)
                         let mEmail = toS <$> ((\(json :: ByteString) -> (json ^? key "emails") >>=
                                 (^? _Array) >>=
@@ -180,7 +181,7 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                                 (^? key "givenName") >>=
                                 (^? _String)) emailResp)
                         let mLastName = toS <$> ((\(json :: ByteString) -> (json ^? key "name") >>=
-                                (^? key "familyName") >>= 
+                                (^? key "familyName") >>=
                                 (^? _String)) emailResp)
                         maybe (f badRequest)
                             (\userInfo -> do
@@ -203,7 +204,7 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                 let mToken = (\(json :: ByteString) -> (json ^? key "access_token") >>= (^? _String)) $ toS $ codeResp ^. responseBody
                 maybe (f badRequest)
                     (\accessToken -> do
-                        emailResp <- (toS . (^.responseBody)) <$> get 
+                        emailResp <- (toS . (^.responseBody)) <$> get
                             ("https://graph.facebook.com/v2.3/me?fields=email,name,first_name,last_name&access_token=" <>
                                 toS accessToken)
                         let mEmail = toS <$> ((\(json :: ByteString) -> (json ^? key "email") >>=
@@ -220,7 +221,7 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                     mToken)
             (join (lookup "code" (queryString req)))
     | pathInfo req == ["logout"] = do
-        f $ responseLBS status302 
+        f $ responseLBS status302
                 [ (hLocation, "/index.html")
                 , ("Set-Cookie", cookieName <> "= deleted; Path=/; Secure; HttpOnly; expires=Thu, 01 Jan 1970 00:00:00 GMT") ]
                 ""

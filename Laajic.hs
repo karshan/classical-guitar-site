@@ -1,36 +1,37 @@
-{-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
-{-# LANGUAGE DeriveAnyClass     #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE DeriveAnyClass      #-}
+{-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving  #-}
 module Laajic where
 
-import DB
-import Data.ByteString (ByteString)
-import Data.String.Conv (toS)
-import Crypto.Random (getRandomBytes)
-import           Crypto.Cipher.AES.Util     (cbcDecrypt', cbcEncrypt')
-import qualified Crypto.KDF.PBKDF2 as PBKDF2 (generate)
-import Crypto.Hash (SHA256(..))
-import Crypto.KDF.PBKDF2 (PRF, prfHMAC, Parameters(..))
-import           Data.Time.Format           (defaultTimeLocale, formatTime,
-                                             parseTimeM)
-import           Data.Time.Clock            (diffUTCTime, getCurrentTime)
-import GHC.Generics (Generic)
-import Data.Aeson (FromJSON, ToJSON)
-import qualified Data.Aeson as Aeson (decode, encode)
-import Data.Aeson.Lens
-import Control.Lens
-import Control.Monad
-import Data.Monoid
-import Network.Wreq
-import Util
-import Common
+import           Common
+import           Control.Lens
+import           Control.Monad
+import           Crypto.Cipher.AES.Util (cbcDecrypt', cbcEncrypt')
+import           Crypto.Hash            (SHA256 (..))
+import           Crypto.KDF.PBKDF2      (PRF, Parameters (..), prfHMAC)
+import qualified Crypto.KDF.PBKDF2      as PBKDF2 (generate)
+import           Crypto.Random          (getRandomBytes)
+import           Data.Aeson             (FromJSON, ToJSON)
+import qualified Data.Aeson             as Aeson (decode, encode)
+import           Data.Aeson.Lens
+import           Data.ByteString        (ByteString)
+import           Data.Monoid
+import           Data.String.Conv       (toS)
+import           Data.Time.Clock        (diffUTCTime, getCurrentTime)
+import           Data.Time.Format       (defaultTimeLocale, formatTime,
+                                         parseTimeM)
+import           DB
+import           GHC.Generics           (Generic)
+import           Network.Wreq
+import           Util
 
 type Salt = ByteString
 
 hashPassword :: Salt -> String -> ByteString
 hashPassword salt password =
-    PBKDF2.generate (prfHMAC SHA256 :: PRF ByteString) 
+    PBKDF2.generate (prfHMAC SHA256 :: PRF ByteString)
         (Parameters { iterCounts = 4000, outputLength = 32 }) (toS password) salt
 
 hashNewPassword :: String -> IO PasswordHash
@@ -88,10 +89,10 @@ data AccountType =
     deriving (Generic, ToJSON, FromJSON)
 
 data CookieJSON = CookieJSON {
-    firstName :: String
-  , lastName :: String
-  , email :: String
-  , accountType :: AccountType
+    firstName    :: String
+  , lastName     :: String
+  , email        :: String
+  , accountType  :: AccountType
   , creationTime :: String
 } deriving (Generic, ToJSON, FromJSON)
 
@@ -107,7 +108,7 @@ isActivated cookieJSON = f (accountType cookieJSON)
         f Facebook = True
 
 data ActivationLinkJSON = ActivationLinkJSON {
-    actEmail :: String
+    actEmail        :: String
   , actCreationTime :: String
 } deriving (Generic, ToJSON, FromJSON)
 
@@ -124,15 +125,15 @@ validateActivationToken key token = do
     let eightHours = 8 * 60 * 60
     currentTime <- getCurrentTime
     let mToken = either (const Nothing) Just $ cbcDecrypt' key $ cookieDecode token
-    maybe (return Nothing) 
+    maybe (return Nothing)
         (\activationLinkJSON -> do
             let mCreationTime = parseTimeM True defaultTimeLocale "%s" $ toS $ actCreationTime activationLinkJSON
             maybe (return Nothing)
-                (\creationTime_ -> 
+                (\creationTime_ ->
                     if currentTime `diffUTCTime` creationTime_ < eightHours then
                         return (Just $ actEmail activationLinkJSON)
                     else
-                        return Nothing) 
+                        return Nothing)
                 mCreationTime)
         (Aeson.decode . toS =<< mToken)
 
@@ -151,14 +152,14 @@ validateCookie key c = do
     let oneWeek = 7 * 24 * 60 * 60
     currentTime <- getCurrentTime
     let mCookie = either (const Nothing) Just $ cbcDecrypt' key $ cookieDecode c
-    maybe (return Nothing) 
+    maybe (return Nothing)
         (\cookieJSON -> do
             let mCreationTime = parseTimeM True defaultTimeLocale "%s" $ toS $ creationTime cookieJSON
             maybe (return Nothing)
-                (\creationTime_ -> 
+                (\creationTime_ ->
                     if currentTime `diffUTCTime` creationTime_ < oneWeek then
                         return (Just cookieJSON)
                     else
-                        return Nothing) 
+                        return Nothing)
                 mCreationTime)
         (Aeson.decode . toS =<< mCookie)
