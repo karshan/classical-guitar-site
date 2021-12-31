@@ -69,6 +69,23 @@ sendVerificationEmail mailgunKey key user = do
             ",\nActivate your account by visiting this <a href=\"" <> activationLink_ <> "\">link</a></p>")
         ]
 
+type ContactForm = [(String, String)]
+sendContactForm :: ByteString -> Key -> ContactForm -> IO ()
+sendContactForm mailgunKey key form = do
+    let authVal = basicAuth "api" mailgunKey
+    let opts = defaults & auth ?~ authVal
+    let contactName = lookup "contact-name" contactReq
+    let contactEmail = lookup "contact-email" contactReq
+    let contactMsgSubject = lookup "contact-message-subject" contactReq
+    let contactMsg = lookup "contact-message-body" contactReq
+    void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/messages"
+        [ ("from" :: ByteString, "Classical Guitar Calendar <noreply@classicalguitarcalendar.com>" :: ByteString)
+        , ("to", "madhavansomanathan@gmail.com")
+        , ("subject", "Message from " <> (toS contactName))
+        , ("text", "Sender: " <> toS contactEmail <> "\nSubject: " <> toS contactMsgSubject <> 
+            "\nMessage:\n" <> toS contactMsg)
+        ]
+
 createFestival :: String -> CookieJSON -> Maybe Festival
 createFestival rawJSON cookieJSON = do
     let mEventName = (^? _String) =<< (rawJSON ^? key "eventName")

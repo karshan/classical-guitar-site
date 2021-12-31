@@ -136,6 +136,10 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                         f $ accountActivated $ toS email) -- TODO account activated page and set cookies here
                     mEmail)
             (join (lookup "token" (queryString req)))
+    | pathInfo req == ["contact"] = do
+        contactReq <- parseRequestBody <$> requestBody req
+        sendContactForm  mailgunKey encryptionKey contactReq
+        f $ responseLBS status302 [(hLocation, "/contact-form-sent.html")] ""
     | pathInfo req == ["login"] = do
         loginReq <- parseRequestBody <$> requestBody req
         let mEmailPass =
