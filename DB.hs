@@ -47,6 +47,13 @@ data Festival = Festival {
   , _rawJSON      :: String
 } deriving (Eq, Show, Ord)
 
+data ContactForm = ContactForm {
+    _contactName  :: String
+  , _contactEmail :: String
+  , _msgSubject   :: String
+  , _msgBody      :: String
+} deriving (Show)
+
 data Database = Database {
     _users     :: Set User
   , _festivals :: Set Festival

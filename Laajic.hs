@@ -53,6 +53,13 @@ createUser req = do
                      <*> return passwordHash
                      <*> return False)) (lookup "userPassword" req)
 
+createContactForm :: [(String, String)] -> Maybe ContactForm
+createContactForm req =
+    ContactForm <$> lookup "contact-name" req
+                <*> lookup "contact-email" req
+                <*> lookup "contact-message-subject" req
+                <*> lookup "contact-message-body" req
+
 -- TODO check for failure and return Bool
 sendVerificationEmail :: ByteString -> Key -> User -> IO ()
 sendVerificationEmail mailgunKey key user = do
@@ -69,22 +76,37 @@ sendVerificationEmail mailgunKey key user = do
             ",\nActivate your account by visiting this <a href=\"" <> activationLink_ <> "\">link</a></p>")
         ]
 
-type ContactForm = [(String, String)]
-sendContactForm :: ByteString -> Key -> ContactForm -> IO ()
-sendContactForm mailgunKey key form = do
+sendContactForm :: ByteString -> ContactForm -> IO ()
+sendContactForm mailgunKey form = do
     let authVal = basicAuth "api" mailgunKey
     let opts = defaults & auth ?~ authVal
-    let contactName = lookup "contact-name" contactReq
-    let contactEmail = lookup "contact-email" contactReq
-    let contactMsgSubject = lookup "contact-message-subject" contactReq
-    let contactMsg = lookup "contact-message-body" contactReq
     void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/messages"
         [ ("from" :: ByteString, "Classical Guitar Calendar <noreply@classicalguitarcalendar.com>" :: ByteString)
-        , ("to", "madhavansomanathan@gmail.com")
-        , ("subject", "Message from " <> (toS contactName))
-        , ("text", "Sender: " <> toS contactEmail <> "\nSubject: " <> toS contactMsgSubject <> 
-            "\nMessage:\n" <> toS contactMsg)
+        , ("to", "classicalguitarcalendar@gmail.com")
+        , ("subject", toS $ "Message from " ++ (_contactName form))
+        , ("text", toS $ "Sender: " ++ (_contactEmail form) ++ "\nSubject: " ++ (_msgSubject form) ++ 
+            "\nMessage:\n" ++ (_msgBody form))
         ]
+
+sendResetPasswordEmail :: ByteString -> Key -> User -> IO ()
+sendResetPasswordEmail mailgunKey key user = do
+    resetPasswordLink_ <- resetPasswordLink key user
+    let authVal = basicAuth "api" mailgunKey
+    let opts = defaults & auth ?~ authVal
+    void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/messages"
+        [ ("from" :: ByteString, "Classical Guitar Calendar <noreply@classicalguitarcalendar.com>" :: ByteString)
+        , ("to", toS $ _email user)
+        , ("subject", "Reset password link")
+        , ("text", "Hey " <> toS (_firstName user) <> " " <> toS (_lastName user) <>
+            ",\nSomeone requested a link to reset the password for the account associated with your email address." <>
+            "\nIf it wasn't you, you can ignore this message. To reset your password, visit the page at: " <>
+            resetPasswordLink_)
+        , ("html", "<p>Hey " <> toS (_firstName user) <> " " <> toS (_lastName user) <>
+            ",</p><p>Someone requested a link to reset the password for the account associated with your email address." <>
+            "</p><p>If it wasn't you, you can ignore this message. To reset your password, visit this <a href=\"" <> 
+            resetPasswordLink_ <> "\">page</a>.</p>")
+        ]
+    
 
 createFestival :: String -> CookieJSON -> Maybe Festival
 createFestival rawJSON cookieJSON = do
@@ -153,6 +175,14 @@ validateActivationToken key token = do
                         return Nothing)
                 mCreationTime)
         (Aeson.decode . toS =<< mToken)
+
+resetPasswordLink :: Key -> User -> IO ByteString
+resetPasswordLink key user = do
+    currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
+    mToken <- cbcEncrypt' key $ toS $ Aeson.encode $ ActivationLinkJSON (_email user) (toS currentTime)
+    either (\s -> error $ "fatal: cbcEncrypt' failed with: " <> s)
+        (\token -> return (serverBaseUrl <> "resetpassword?token=" <> (cookieEncode token)))
+        mToken
 
 generateCookie :: Key -> AccountType -> (String, String, String) -> IO ByteString
 generateCookie key acType (fn, ln, em) = do

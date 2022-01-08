@@ -40,6 +40,7 @@ main = do
 
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
 userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
+userDoesNotExist email = responseLBS status400 [(hContentType, "text/plain")] ("user " <> email <> " doesn't exist")
 verifyEmail = responseLBS status200 [(hContentType, "text/plain")] "Please verify your email by clicking the link in the email we sent you"
 accountActivated email = responseLBS status200 [(hContentType, "text/plain")] (email <> ", you're account has been activated")
 notFound = responseLBS status404 [] "404 Not Found"
@@ -138,8 +139,12 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
             (join (lookup "token" (queryString req)))
     | pathInfo req == ["contact"] = do
         contactReq <- parseRequestBody <$> requestBody req
-        sendContactForm  mailgunKey encryptionKey contactReq
-        f $ responseLBS status302 [(hLocation, "/contact-form-sent.html")] ""
+        let mContactForm = createContactForm contactReq
+        maybe (f badRequest)
+            (\contactForm -> do
+                sendContactForm mailgunKey contactForm
+                f $ responseLBS status302 [(hLocation, "/contact_form_sent.html")] "")
+            mContactForm
     | pathInfo req == ["login"] = do
         loginReq <- parseRequestBody <$> requestBody req
         let mEmailPass =
@@ -158,6 +163,19 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                             f loginFailed)
                     mUser)
             mEmailPass
+    | pathInfo req == ["forgotpassword"] = do
+        fpReq <- parseRequestBody <$> requestBody req
+        let mEmail = lookup "forgot-password-email" fpReq
+        maybe (f badRequest)
+            (\email -> do
+                users <- runDB db getUsers
+                let mUser = find ((== email) . _email) users
+                maybe (f $ userDoesNotExist $ toS email)
+                    (\user -> do
+                        sendResetPasswordEmail mailgunKey encryptionKey user
+                        f $ responseLBS status302 [(hLocation, "/reset_password_link_sent.html")] "")
+                    mUser)
+            mEmail
     | pathInfo req == ["googleoauth"] = do
         -- TODO error logging
         -- TODO disable wreq exceptions (but log them ?)
