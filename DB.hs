@@ -43,7 +43,7 @@ data User = User {
 
 data Festival = Festival {
     _ownerEmail   :: String
-  , _festivalName :: String -- for URL so Primary Key
+  , _URISafeName :: String -- for URL so Primary Key
   , _rawJSON      :: String
 } deriving (Eq, Show, Ord)
 
@@ -99,7 +99,7 @@ getFestivals_ = view festivals <$> ask
 addFestival_ :: Festival -> Update Database Bool
 addFestival_ festival = do
     db <- get
-    let mExistingFestival = find ((_festivalName festival ==) . _festivalName) (db ^. festivals)
+    let mExistingFestival = find ((_URISafeName festival ==) . _URISafeName) (db ^. festivals)
     maybe (put ((festivals %~ (insert festival)) db) >> return True)
         (const $ return False)
         mExistingFestival

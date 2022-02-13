@@ -81,7 +81,7 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
     | head (pathInfo req) == "festivals" && length (pathInfo req) == 2 = do
         let reqFestivalName = (pathInfo req) !! 1
         festivals <- runDB db getFestivals
-        let mFestival = find ((toS reqFestivalName ==) . _festivalName) festivals
+        let mFestival = find ((toS reqFestivalName ==) . _URISafeName) festivals
         maybe (f notFound)
             (\festival -> do
                 header <- LBS.readFile (staticRoot <> "header.html")
@@ -95,6 +95,11 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                                 mCookieJSON
                 f $ responseLBS status200 [(hContentType, "text/html")] (header <> renderJsVars jsVars <> contents <> footer))
             mFestival
+    | head (pathInfo req) == "edit" && length (pathInfo req) == 2 = do
+        mCookieJSON <- getCookieJSON encryptionKey req
+        let reqFestivalName = (pathInfo req) !! 1
+        --TODO
+        f badRequest
     | pathInfo req == ["registerFestival"] = do
         mCookieJSON <- getCookieJSON encryptionKey req
         maybe (f notAuthorized)

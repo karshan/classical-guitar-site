@@ -110,11 +110,11 @@ sendResetPasswordEmail mailgunKey key user = do
 
 createFestival :: String -> CookieJSON -> Maybe Festival
 createFestival rawJSON cookieJSON = do
-    let mEventName = (^? _String) =<< (rawJSON ^? key "eventName")
+    let mEventName = (^? _String) =<< (rawJSON ^? key "URISafeName")
     maybe Nothing
         (\eventName -> Just $ Festival {
             _ownerEmail = Laajic.email cookieJSON
-          , _festivalName = toS eventName
+          , _URISafeName = toS eventName
           , _rawJSON = rawJSON
         })
         mEventName
