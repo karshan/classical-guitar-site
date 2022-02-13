@@ -41,12 +41,16 @@ main = do
 badRequest = responseLBS status400 [(hContentType, "text/plain")] "what nonsense is this ? baad request daag"
 userExists = responseLBS status400 [(hContentType, "text/plain")] "user with this email already exists"
 userDoesNotExist email = responseLBS status400 [(hContentType, "text/plain")] ("user " <> email <> " doesn't exist")
-verifyEmail = responseLBS status200 [(hContentType, "text/plain")] "Please verify your email by clicking the link in the email we sent you"
-accountActivated email = responseLBS status200 [(hContentType, "text/plain")] (email <> ", you're account has been activated")
+accountActivated email = responseLBS status200 [(hContentType, "text/plain")] (email <> ", your account has been activated")
 notFound = responseLBS status404 [] "404 Not Found"
-festivalExists = responseLBS status400 [(hContentType, "text/plain")] "festival with this name already exists"
+festivalExists = 
+    responseLBS status400 [(hContentType, "text/plain")] 
+        "Could not register event: an event with this name already exists."
 loginFailed = responseLBS status403 [(hContentType, "text/plain")] "Laaagin failed, daaaaag"
-notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "Gatta laagin first daaag"
+notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "You must login to register an event."
+userNotAuthorized = responseLBS status403 [(hContentType, "text/plain")] "You do not have permission to edit this event."
+notActivated = responseLBS status403 [(hContentType, "text/plain")] "You must verify your email address to register an event."
+verifyEmail = responseLBS status302 [(hLocation, "/verification_link_sent.html")] ""
 cookieResponse cookie =
     responseLBS status302
         [ (hLocation, "/index.html")
@@ -97,15 +101,30 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
             mFestival
     | head (pathInfo req) == "edit" && length (pathInfo req) == 2 = do
         mCookieJSON <- getCookieJSON encryptionKey req
-        let reqFestivalName = (pathInfo req) !! 1
-        --TODO
-        f badRequest
+        maybe (f notAuthorized)
+            (\cookieJSON -> do
+                let cookieEmail = Laajic.email cookieJSON
+                let reqFestivalName = (pathInfo req) !! 1
+                festivals <- runDB db getFestivals
+                let mFestival = find ((toS reqFestivalName ==) . _URISafeName) festivals
+                maybe (f notFound)
+                    (\festival -> 
+                        if cookieEmail /= (_ownerEmail festival) then
+                            f userNotAuthorized
+                        else do
+                            header <- LBS.readFile (staticRoot <> "header.html")
+                            footer <- LBS.readFile (staticRoot <> "footer.html")
+                            contents <- LBS.readFile (staticRoot <> "editFestival.html")
+                            let jsVars = [("festival", Aeson.encode festival)] <> [("user", Aeson.encode cookieJSON)]
+                            f $ responseLBS status200 [(hContentType, "text/html")] (header <> renderJsVars jsVars <> contents <> footer))
+                    mFestival)
+            mCookieJSON                                    
     | pathInfo req == ["registerFestival"] = do
         mCookieJSON <- getCookieJSON encryptionKey req
         maybe (f notAuthorized)
             (\cookieJSON ->
                 if isActivated cookieJSON == False then
-                    f notAuthorized
+                    f notActivated
                 else do
                     rawReq <- toS <$> requestBody req
                     let mFestival = createFestival rawReq cookieJSON
@@ -132,6 +151,19 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                     (const $ f userExists)
                     mExistingUser)
             mUser
+    | pathInfo req == ["sendActivationEmail"] = do
+        mCookieJSON <- getCookieJSON encryptionKey req
+        maybe (f badRequest)
+            (\cookieJSON -> do
+                users <- runDB db getUsers
+                let cookieEmail = Laajic.email cookieJSON
+                let mUser = find ((== cookieEmail) . _email) users
+                maybe (f $ userDoesNotExist $ toS cookieEmail)
+                    (\user -> do
+                        sendVerificationEmail mailgunKey encryptionKey user
+                        f verifyEmail)
+                    mUser)
+            mCookieJSON
     | pathInfo req == ["activate"] = do
         maybe (f badRequest)
             (\token -> do
