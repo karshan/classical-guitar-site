@@ -114,7 +114,7 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                         else do
                             header <- LBS.readFile (staticRoot <> "header.html")
                             footer <- LBS.readFile (staticRoot <> "footer.html")
-                            contents <- LBS.readFile (staticRoot <> "editFestival.html")
+                            contents <- LBS.readFile (staticRoot <> "festivalRegistration.html")
                             let jsVars = [("festival", Aeson.encode festival)] <> [("user", Aeson.encode cookieJSON)]
                             f $ responseLBS status200 [(hContentType, "text/html")] (header <> renderJsVars jsVars <> contents <> footer))
                     mFestival)
@@ -136,6 +136,27 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
                             else
                                 f festivalExists)
                         mFestival)
+            mCookieJSON
+    | pathInfo req == ["editFestival"] = do
+        mCookieJSON <- getCookieJSON encryptionKey req
+        maybe (f notAuthorized)
+            (\cookieJSON -> do
+                let cookieEmail = Laajic.email cookieJSON
+                rawReq <- toS <$> requestBody req
+                let mFestival = createFestival rawReq cookieJSON
+                maybe (f badRequest)
+                    (\festival -> do
+                        festivals <- runDB db getFestivals
+                        let mExistingFestival = find ((_URISafeName festival ==) . _URISafeName) festivals
+                        maybe (f notFound)
+                            (\existingFestival -> do
+                                if cookieEmail /= (_ownerEmail existingFestival) then
+                                    f userNotAuthorized
+                                else do
+                                    runDB db (editFestival festival existingFestival)
+                                    f $ responseLBS status200 [(hContentType, "text/plain")] "Festival Updated")
+                            mExistingFestival)
+                    mFestival)
             mCookieJSON
     | pathInfo req == ["register"] = do
         registerReq <- parseRequestBody <$> requestBody req

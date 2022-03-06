@@ -104,11 +104,17 @@ addFestival_ festival = do
         (const $ return False)
         mExistingFestival
 
+editFestival_ :: Festival -> Festival -> Update Database ()
+editFestival_ festival existingFestival = do
+    db <- get
+    put $ (festivals %~ (\fs -> insert festival $ delete existingFestival fs)) db
+
 $(makeAcidic ''Database [ 'getUsers_
                         , 'addUser_
                         , 'activateUser_
                         , 'getFestivals_
-                        , 'addFestival_ ])
+                        , 'addFestival_
+                        , 'editFestival_ ])
 
 newtype DB a = DB { unDB :: ReaderT (AcidState Database) IO a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadReader (AcidState Database))
@@ -134,6 +140,9 @@ getUsers = (`query'` GetUsers_) =<< ask
 
 addFestival :: Festival -> DB Bool
 addFestival festival = (`update'` AddFestival_ festival) =<< ask
+
+editFestival :: Festival -> Festival -> DB ()
+editFestival festival existingFestival = (`update'` EditFestival_ festival existingFestival) =<< ask
 
 getFestivals :: DB (Set Festival)
 getFestivals = (`query'` GetFestivals_) =<< ask
