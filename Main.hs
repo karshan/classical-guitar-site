@@ -51,6 +51,7 @@ notAuthorized = responseLBS status403 [(hContentType, "text/plain")] "You must l
 userNotAuthorized = responseLBS status403 [(hContentType, "text/plain")] "You do not have permission to edit this event."
 notActivated = responseLBS status403 [(hContentType, "text/plain")] "You must verify your email address to register an event."
 verifyEmail = responseLBS status302 [(hLocation, "/verification_link_sent.html")] ""
+resetPasswordLinkExpired = responseLBS status302 [(hLocation, "/reset_password_link_expired.html")] ""
 cookieResponse cookie =
     responseLBS status302
         [ (hLocation, "/index.html")
@@ -188,13 +189,40 @@ app mailgunKey (googClientId, googClientSecret) (facebookClientId, facebookClien
     | pathInfo req == ["activate"] = do
         maybe (f badRequest)
             (\token -> do
-                mEmail <- validateActivationToken encryptionKey token
-                maybe (f badRequest)
+                mEmail <- validateActivationToken encryptionKey token "activate"
+                maybe (f $ responseLBS status302 [(hLocation, "/activation_link_expired.html")] "")
                     (\email -> do
                         runDB db (activateUser email)
                         f $ accountActivated $ toS email) -- TODO account activated page and set cookies here
                     mEmail)
             (join (lookup "token" (queryString req)))
+    | pathInfo req == ["resetpassword"] = do
+        -- render reset password form
+        maybe (f badRequest)
+            (\token -> do
+                mEmail <- validateActivationToken encryptionKey token "resetpassword"
+                maybe (f resetPasswordLinkExpired)
+                    (const $ do
+                        header <- LBS.readFile (staticRoot <> "header.html")
+                        footer <- LBS.readFile (staticRoot <> "footer.html")
+                        contents <- LBS.readFile (staticRoot <> "resetPassword.html")
+                        f $ responseLBS status200 [(hContentType, "text/html")] (header <> contents <> footer))
+                    mEmail)
+            (join (lookup "token" (queryString req)))
+    | pathInfo req == ["resettingpassword"] = do
+        -- update user password
+        rpReq <- parseRequestBody <$> requestBody req
+        let mPasswordToken = (,) <$> lookup "new-password" rpReq <*> lookup "reset-password-token" rpReq
+        maybe (f badRequest)
+            (\(password, token) -> do
+                mEmail <- validateActivationToken encryptionKey (toS token) "resetpassword"
+                maybe (f resetPasswordLinkExpired)
+                    (\email -> do
+                        newPasswordHash <- hashNewPassword password
+                        runDB db (updateUserPassword email newPasswordHash)
+                        f $ responseLBS status302 [(hLocation, "/reset_password_success.html")] "")
+                    mEmail)
+            mPasswordToken
     | pathInfo req == ["contact"] = do
         contactReq <- parseRequestBody <$> requestBody req
         let mContactForm = createContactForm contactReq

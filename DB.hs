@@ -92,6 +92,17 @@ activateUser_ email = do
             put ((users %~ (insert activatedUser . delete user)) db) >> return (Just activatedUser))
         mUser
 
+-- returns Nothing if the user with specified email wasn't found
+updateUserPassword_ :: String -> PasswordHash -> Update Database (Maybe User)
+updateUserPassword_ email newPasswordHash = do
+    db <- get
+    let mUser = find ((email ==) . _email) (db ^. users)
+    maybe (return Nothing)
+        (\user -> do
+            let updatedUser = user & passwordHash .~ newPasswordHash
+            put ((users %~ (insert updatedUser . delete user)) db) >> return (Just updatedUser))
+        mUser
+
 getFestivals_ :: Query Database (Set Festival)
 getFestivals_ = view festivals <$> ask
 
@@ -112,6 +123,7 @@ editFestival_ festival existingFestival = do
 $(makeAcidic ''Database [ 'getUsers_
                         , 'addUser_
                         , 'activateUser_
+                        , 'updateUserPassword_
                         , 'getFestivals_
                         , 'addFestival_
                         , 'editFestival_ ])
@@ -134,6 +146,9 @@ addUser user = (`update'` AddUser_ user) =<< ask
 
 activateUser :: String -> DB (Maybe User)
 activateUser email = (`update'` ActivateUser_ email) =<< ask
+
+updateUserPassword :: String -> PasswordHash -> DB (Maybe User)
+updateUserPassword email newPasswordHash = (`update'` UpdateUserPassword_ email newPasswordHash) =<< ask
 
 getUsers :: DB (Set User)
 getUsers = (`query'` GetUsers_) =<< ask

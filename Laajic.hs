@@ -61,6 +61,7 @@ createContactForm req =
                 <*> lookup "contact-message-body" req
 
 -- TODO check for failure and return Bool
+-- TODO show full URL instead of wrapper text?
 sendVerificationEmail :: ByteString -> Key -> User -> IO ()
 sendVerificationEmail mailgunKey key user = do
     activationLink_ <- activationLink key user
@@ -83,11 +84,14 @@ sendContactForm mailgunKey form = do
     void $ postWith opts "https://api.mailgun.net/v3/classicalguitarcalendar.com/messages"
         [ ("from" :: ByteString, "Classical Guitar Calendar <noreply@classicalguitarcalendar.com>" :: ByteString)
         , ("to", "classicalguitarcalendar@gmail.com")
-        , ("subject", toS $ "Message from " ++ (_contactName form))
+        , ("subject", toS $ "Contact form from " ++ (_contactName form))
         , ("text", toS $ "Sender: " ++ (_contactEmail form) ++ "\nSubject: " ++ (_msgSubject form) ++ 
             "\nMessage:\n" ++ (_msgBody form))
+        , ("html", toS $ "<p>Sender: " ++ (_contactEmail form) ++ "</p><p>Subject: " ++ (_msgSubject form) ++
+            "</p><p>Message:</p><p>" ++ (_msgBody form))
         ]
 
+-- TODO show full URL instead of wrapper text?
 sendResetPasswordEmail :: ByteString -> Key -> User -> IO ()
 sendResetPasswordEmail mailgunKey key user = do
     resetPasswordLink_ <- resetPasswordLink key user
@@ -159,9 +163,16 @@ activationLink key user = do
         (\token -> return (serverBaseUrl <> "activate?token=" <> (cookieEncode token)))
         mToken
 
-validateActivationToken :: Key -> ByteString -> IO (Maybe String)
-validateActivationToken key token = do
+type WhetherActivateOrResetPassword = String
+
+validateActivationToken :: Key -> ByteString -> WhetherActivateOrResetPassword -> IO (Maybe String)
+validateActivationToken key token activateOrResetPassword = do
     let eightHours = 8 * 60 * 60
+    let halfHour = 30 * 60
+    -- TODO could use pattern matching or guards instead of if-else?
+    let validityDuration = if activateOrResetPassword == "activate" then eightHours 
+        else if activateOrResetPassword == "resetpassword" then halfHour
+        else 0
     currentTime <- getCurrentTime
     let mToken = either (const Nothing) Just $ cbcDecrypt' key $ cookieDecode token
     maybe (return Nothing)
@@ -169,13 +180,14 @@ validateActivationToken key token = do
             let mCreationTime = parseTimeM True defaultTimeLocale "%s" $ toS $ actCreationTime activationLinkJSON
             maybe (return Nothing)
                 (\creationTime_ ->
-                    if currentTime `diffUTCTime` creationTime_ < eightHours then
+                    if currentTime `diffUTCTime` creationTime_ < validityDuration then
                         return (Just $ actEmail activationLinkJSON)
                     else
                         return Nothing)
                 mCreationTime)
         (Aeson.decode . toS =<< mToken)
 
+-- TODO combine with activationLink function
 resetPasswordLink :: Key -> User -> IO ByteString
 resetPasswordLink key user = do
     currentTime :: ByteString <- toS . formatTime defaultTimeLocale "%s" <$> getCurrentTime
